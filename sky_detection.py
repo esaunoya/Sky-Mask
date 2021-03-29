@@ -1,4 +1,5 @@
 import cv2
+import base64
 import numpy as np
 from scipy import spatial
 
@@ -11,30 +12,11 @@ def make_mask(b, image):
     return mask
 
 
-def display_mask(b, image, color=[0, 0, 255]):
-    result = image.copy()
-    overlay = np.full(image.shape, color, image.dtype)
-
-    cv2.imwrite(
-        'output/maskedImage.jpg',
-        cv2.addWeighted(
-            cv2.bitwise_and(overlay, overlay, mask=make_mask(b, image)),
-            1,
-            image,
-            1,
-            0,
-            result
-        )
-    )
-
-
 def mask_only(b, image, color=[255, 255, 255]):
     result = image.copy()
     overlay = np.full(image.shape, color, image.dtype)
 
-    cv2.imwrite(
-        'output/mask.jpg',
-        cv2.addWeighted(
+    mask = cv2.addWeighted(
             cv2.bitwise_not(overlay, overlay, mask=make_mask(b, image)),
             1,
             0,
@@ -42,15 +24,29 @@ def mask_only(b, image, color=[255, 255, 255]):
             0,
             result
         )
-    )
+
+    # cv2.imwrite(
+    #     'output/mask.jpg',
+    #     mask
+    # )
+
+    return mask
+
+
+
+
 
 
 def no_sky_found_mask(image):
 
     grayImage = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-    (thresh, bwImg) = cv2.threshold(grayImage, 127, 255, cv2.THRESH_BINARY)
+    (thresh, mask) = cv2.threshold(grayImage, 127, 255, cv2.THRESH_BINARY)
 
-    cv2.imwrite('output/mask.jpg', bwImg)
+    # cv2.imwrite('output/mask.jpg', mask)
+
+    return mask
+
+
 
 
 def display_cv2_image(image):
@@ -225,40 +221,75 @@ def refine_sky(bopt, image):
 
 def detect_sky(image):
     # display(input_image)
-    cv2.imwrite('output/input_image.jpg', input_image)
+    # cv2.imwrite('output/input_image.jpg', input_image)
 
     bopt = calculate_border_optimal(image)
 
     if no_sky_region(bopt, image.shape[0]/30, image.shape[0]/4, 5):
         # display("No sky detected")
         # print('no sky detected')
-        no_sky_found_mask(image)
-        return
+        mask = no_sky_found_mask(image)
+        return mask
 
     # display_mask(bopt, image)
-    mask_only(bopt, image)
+    mask = mask_only(bopt, image)
 
     if partial_sky_region(bopt, image.shape[1]/3):
         bnew = refine_sky(bopt, image)
 
         # display_mask(bnew, image)
-        mask_only(bnew, image)
+        mask = mask_only(bnew, image)
+
+    return mask
 
 
 def sky_ratio(image):
     sky = np.sum(image == 255)
     notSky = np.sum(image == 0)
-    per = (sky / (sky + notSky)) * 100
+    per = (sky / (sky + notSky))
 
-    print(f'Image is {per}% sky.')
+    # print(f'Image is {per}% sky.')
+
+    return per
+
+def encode(path):
+    with open(path, "rb") as f:
+        im_b64 = base64.b64encode(f.read())
+    return im_b64
+
+def decode(im_b64):
+    im_bytes = base64.b64decode(im_b64)
+    im_arr = np.frombuffer(im_bytes, dtype=np.uint8)  # im_arr is one-dim Numpy array
+    img = cv2.imdecode(im_arr, flags=cv2.IMREAD_COLOR)
+    return img
+
 
 # # input_image = cv2.imread("fixtures/full_sky.png")
 # input_image = cv2.imread("fixtures/partial_sky.png")
 # input_image = cv2.imread("fixtures/no_sky.png")
-input_image = cv2.imread("fixtures/backyard.jpg")
 
-detect_sky(input_image)
+# input_image = cv2.imread("fixtures/backyard.jpg")
 
-sky_mask = cv2.imread("output/mask.jpg")
 
-sky_ratio(sky_mask)
+## encoded image we will receive
+img_encoded = encode("fixtures/no_sky.png")
+
+## decode the received image
+input_image = decode(img_encoded)
+
+## magic
+mask = detect_sky(input_image)
+
+_, im_arr = cv2.imencode('.jpg', mask)  # im_arr: image in Numpy one-dim array format.
+im_bytes = im_arr.tobytes()
+
+# THIS IS THE ENCODED MASK FOR FE
+encodedMask = base64.b64encode(im_bytes)
+percentage = sky_ratio(mask)
+
+# decodedMask = decode(encodedMask)
+# cv2.imwrite('output/decoded_mask.jpg', decodedMask)
+
+## determine % sky
+# sky_mask = cv2.imread("output/mask.jpg")
+# sky_ratio(decodedMask)
